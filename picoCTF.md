@@ -775,7 +775,8 @@ print(long_to_bytes(pow(c, d, n)))
 ## john_pollard
 
 <https://stackoverflow.com/questions/10271197/how-to-extract-public-key-using-openssl>
-<factordb.com>
+
+<http://factordb.com>
 
 ```bash
 openssl x509 -noout -text -in cert
@@ -831,4 +832,95 @@ p = pollard(n)
 q = n // p
 d = inverse(e, (p - 1) * (q - 1))
 print(long_to_bytes(pow(c, d, n)))
+```
+
+# It's not my fault
+
+reference: <https://bitsdeep.com/posts/attacking-rsa-for-fun-and-ctf-points-part-4/>
+Brute force attack on small secret CRT-Exponents
+
+```python=
+from pwn import *
+import hashlib
+from gmpy2 import gcd
+from multiprocessing import Pool
+import random
+from tqdm import tqdm
+
+def solve_md5(str_start, hash_end):
+    idx = 0
+    while True:
+        str_test = str_start + str(idx)
+        str_test_hash = str(hashlib.md5(str_test.encode()).hexdigest())
+        if str_test_hash[-len(hash_end):] == hash_end:
+            return str_test
+        idx += 1
+
+def brute_force(argv):
+    m, e, dq, n, r = argv
+    p = gcd(m - pow(m, e * dq, n), n)    
+    if p != 1:
+        r.sendline(str(p + n // p).encode())
+        print(r.recvline())
+        r.close
+        exit(0)
+
+r = remote('mercury.picoctf.net', 47414)
+s = r.recvline()
+str_start, hash_end = s.split(b'"')[1].decode(), s.split(b' ')[-1].decode().strip()
+r.sendline(solve_md5(str_start, hash_end).encode())
+n = int(r.recvline().split(b' ')[-1].decode())
+e = int(r.recvline().split(b' ')[-1].decode())
+
+m = random.randint(1024, 2048)
+tasks = [(m, e, dq, n, r) for dq in range(1, (1 << 20) + 1)]
+with Pool(processes=10) as p:
+    p.map(brute_force, tasks, chunksize=1000)
+```
+
+## sequences
+
+Pure dynamic programming
+
+```python=
+import math
+import hashlib
+import sys
+from tqdm import tqdm
+
+ITERS = int(2e7)
+VERIF_KEY = "96cc5f3b460732b442814fd33cf8537c"
+ENCRYPTED_FLAG = bytes.fromhex("42cbbce1487b443de1acf4834baed794f4bbd0dfb5885e6c7ed9a3c62b")
+MOD = 10**10000
+
+def m_func(i):
+    if i == 0: return 1
+    if i == 1: return 2
+    if i == 2: return 3
+    if i == 3: return 4
+
+    return 55692*m_func(i-4) - 9549*m_func(i-3) + 301*m_func(i-2) + 21*m_func(i-1)
+
+
+# Decrypt the flag
+def decrypt_flag(sol):
+    sol = sol % (10**10000)
+    sol = str(sol)
+    sol_md5 = hashlib.md5(sol.encode()).hexdigest()
+
+    if sol_md5 != VERIF_KEY:
+        print("Incorrect solution")
+        sys.exit(1)
+
+    key = hashlib.sha256(sol.encode()).digest()
+    flag = bytearray([char ^ key[i] for i, char in enumerate(ENCRYPTED_FLAG)]).decode()
+
+    print(flag)
+
+if __name__ == "__main__":
+    # sol = m_func(ITERS)
+    arr = [1, 2, 3, 4]
+    for i in tqdm(range(ITERS), ncols=55):
+        arr = arr[1:] + [(55692 * arr[0] - 9549 * arr[1] + 301 * arr[2] + 21 * arr[3]) % MOD]
+    decrypt_flag(arr[0])
 ```
